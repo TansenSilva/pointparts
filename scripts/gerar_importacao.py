@@ -94,22 +94,132 @@ def parse_vibe_maritimo(path: str):
     return rows, ignored
 
 
+# ----------------------------------------------------------------------------------------
+# Lista World Mobile: blocos de 3 colunas (MODELOS | SEM ARO | COM ARO), preços como "R$ 45,00".
+# Um modelo pode agrupar vários aparelhos ("A02S-A03-A04E"): cada aparelho vira uma peça,
+# com o mesmo preço, para casar com as listas dos outros fornecedores.
+# ----------------------------------------------------------------------------------------
+WM_TRIPLETS = [(2, 3, 4), (5, 6, 7), (8, 9, 10), (11, 12, 13), (14, 15, 16), (17, 18, 19)]
+# cabeçalho (linha 5) -> estado inicial: (marca, sufixo, divide por "-")
+WM_START = {
+    2: ("Samsung", "", True), 5: ("Samsung", "", True), 8: ("Motorola", "", True),
+    11: ("LG", "", True), 14: ("Asus", "", True), 17: ("Xiaomi", "", True),
+}
+# subcabeçalhos (texto sem preço) -> (marca, sufixo); None mantém o valor atual
+WM_HEADERS = [
+    # linhas "PRIME / WEFIX / NACIONAL / DIAGNOSTIC" são outras qualidades, com nomes e preços que
+    # não casam com as demais listas: ficam de fora (SKIP vale para o resto da coluna).
+    ("WEFIX", (None, "SKIP")), ("SAMSUNG NACIONAL", ("Samsung", "SKIP")), ("FRONTAL NACIONAL", (None, "SKIP")),
+    ("REALME LINHA PRIME", ("Realme", "SKIP")),
+    ("MOTOROLA OLED", ("Motorola", "")), ("FRONTAL XIAOMI OLED", ("Xiaomi", "OLED")),
+    ("IPHONE INCELL", ("Apple", "INCELL")), ("IPHONE OLED", ("Apple", "OLED")),
+    ("REALME", ("Realme", "")), ("HUAWEI", ("Huawei", "")), ("OPPO", ("Oppo", "")), ("HONOR", ("Honor", "")),
+    ("INFINIX", ("Infinix", "")), ("TOUCH TABLET", (None, "TABLET")),
+]
+
+
+def wm_price(v):
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return float(v) if v > 0 else None
+    if isinstance(v, str):
+        m = re.search(r"(\d[\d.]*,\d{2}|\d+)", v)
+        if m:
+            n = float(m.group(1).replace(".", "").replace(",", "."))
+            return n if n > 0 else None
+    return None
+
+
+def wm_models(raw: str, brand: str | None) -> list[str]:
+    s = re.sub(r"\s+", " ", raw.upper()).strip()
+    s = re.sub(r"\b(PROMOCAO|PROMOÇÃO)\b", "", s)
+    s = re.sub(r"\bINCEEL\b", "INCELL", s)
+    s = re.sub(r"\bINCEL\b", "INCELL", s)
+    s = re.sub(r"^(MT|FRONTAL)\s+", "", s)
+    s = re.sub(r"\s+", " ", s).strip(" -/")
+    trailing = ""
+    m = re.search(r"\b(OLED|INCELL)\b", s)
+    if m and brand != "Apple":
+        trailing = m.group(1)                      # "A16 OLED/A17/A26": a tecnologia vale para todos
+        s = re.sub(r"\s+", " ", re.sub(rf"\b{trailing}\b", " ", s)).strip(" -/")
+    seps = r"/" if brand == "Apple" else r"[-/]"
+    parts = [p.strip() for p in re.split(seps, s) if p.strip()]
+    out, prev = [], ""
+    for p in parts:
+        if re.fullmatch(r"[45]G", p) and prev:           # "A16 4G/5G" -> A16 4G, A16 5G
+            p = re.sub(r"\s*[45]G$", "", prev) + " " + p
+        if not re.search(r"\d", p):            # sem número = não é um código de modelo ("OLED", "F. DIGITAL")
+            continue
+        if trailing and not p.endswith(trailing):
+            p = f"{p} {trailing}"
+        out.append(p)
+        prev = p
+    return out
+
+
+def parse_world_mobile(path: str):
+    ws = openpyxl.load_workbook(path, data_only=True).active
+    state = {m: list(v[:2]) for m, v in WM_START.items()}
+    rows, skipped = [], defaultdict(int)
+    for r in range(7, ws.max_row + 1):
+        for m, s_col, c_col in WM_TRIPLETS:
+            raw = ws.cell(r, m).value
+            if raw is None or not str(raw).strip():
+                continue
+            raw = str(raw).strip()
+            sem, com = wm_price(ws.cell(r, s_col).value), wm_price(ws.cell(r, c_col).value)
+            if sem is None and com is None:
+                if state[m][1] == "SKIP":
+                    continue
+                for key, (b, suf) in WM_HEADERS:
+                    if raw.upper() == key or raw.upper().startswith(key):
+                        if b:
+                            state[m][0] = b
+                        state[m][1] = suf
+                        break
+                continue
+            brand, suffix = state[m]
+            if re.search(r"PRIME|DIAGNOSTIC|RETIRAD|NACIONAL|PROMO|\bT/C\b", raw.upper()):
+                skipped["linhas PRIME/NACIONAL/WEFIX"] += 1
+                continue
+            if suffix in ("SKIP", "TABLET"):
+                skipped["linhas PRIME/NACIONAL/WEFIX" if suffix == "SKIP" else "tablets"] += 1
+                continue
+            for model in wm_models(raw, brand):
+                tech = technology(model)
+                variants = [("SEM ARO", sem), ("COM ARO", com)]
+                if brand == "Apple":                      # iPhone não tem "aro": um preço só
+                    variants = [("", sem if sem is not None else com)]
+                for var, price in variants:
+                    if price is None:
+                        continue
+                    suf = suffix if suffix not in ("", "TABLET") and suffix not in model.split() else ""
+                    name = " ".join(x for x in (model, suf, var) if x)
+                    rows.append({"name": display_name(name, brand), "brand": brand, "tech": tech,
+                                 "quality": quality(name), "supplier": "World Mobile", "price": price,
+                                 "src": f"célula {openpyxl.utils.get_column_letter(m)}{r}: {raw}"})
+    return rows, dict(skipped)
+
+
 def q(v):
     return "null" if v is None else "'" + str(v).replace("'", "''") + "'"
 
 
-def build_sql(rows, date: str, suppliers: list[str]):
-    # um preço por (peça, fornecedor): em duplicidade, vale o menor
-    best, dup = {}, []
+def build_sql(rows, date: str, suppliers: list[str], conflict: str = "min"):
+    # um preço por (peça, fornecedor). Em duplicidade com preços diferentes:
+    #   conflict="min"     -> vale o menor
+    #   conflict="exclude" -> a peça NÃO é importada para esse fornecedor (vai para o relatório)
+    groups = defaultdict(list)
     for r in rows:
-        k = (norm(r["name"]), r["supplier"])
-        if k in best:
-            dup.append((best[k], r))
-            if r["price"] < best[k]["price"]:
-                best[k] = r
-        else:
-            best[k] = r
-    final = list(best.values())
+        groups[(norm(r["name"]), r["supplier"])].append(r)
+    final, dup = [], []
+    for k, g in groups.items():
+        if len(g) == 1:
+            final.append(g[0])
+            continue
+        prices = {x["price"] for x in g}
+        dup.append(g)
+        if len(prices) == 1 or conflict == "min":
+            final.append(min(g, key=lambda x: x["price"]))
     values = ",\n".join(
         f"  ({q(r['name'])}, {q(r['brand'])}, {q(r['tech'])}, {q(r['quality'])}, {q(r['supplier'])}, {r['price']:.2f})"
         for r in final)
@@ -165,7 +275,12 @@ def main():
     ap.add_argument("xlsx")
     ap.add_argument("--data", required=True, help="data da lista, AAAA-MM-DD")
     ap.add_argument("--saida", required=True)
+    ap.add_argument("--lista", choices=["vibe_maritimo", "world_mobile"], default="vibe_maritimo")
+    ap.add_argument("--existentes", help="xlsx Vibe/Marítimo, para informar quais peças da World Mobile já existem")
+    ap.add_argument("--relatorio", help="CSV com o resultado do casamento de nomes (World Mobile)")
     a = ap.parse_args()
+    if a.lista == "world_mobile":
+        return main_wm(a)
     rows, ignored = parse_vibe_maritimo(a.xlsx)
     sql, final, dup = build_sql(rows, a.data, ["Vibe", "Marítimo"])
     open(a.saida, "w", encoding="utf-8").write(sql)
@@ -176,8 +291,34 @@ def main():
     print(f"ofertas: {len(final)} | peças: {len(by)} | em ambos os fornecedores: {both} | sem preço (ignorados): {ignored}")
     for s in ("Vibe", "Marítimo"):
         print(f"  {s}: {sum(1 for r in final if r['supplier'] == s)} ofertas")
-    for old, new in dup:
-        print(f"  duplicado ({new['name']} / {new['supplier']}): {old['price']} x {new['price']} -> vale o menor")
+    for g in dup:
+        print(f"  duplicado ({g[0]['name']} / {g[0]['supplier']}): {sorted({x['price'] for x in g})} -> vale o menor")
+
+
+def main_wm(a):
+    import csv
+    rows, skipped = parse_world_mobile(a.xlsx)
+    sql, final, dup = build_sql(rows, a.data, ["World Mobile"], conflict="exclude")
+    open(a.saida, "w", encoding="utf-8").write(sql)
+    existing = set()
+    if a.existentes:
+        base, _ = parse_vibe_maritimo(a.existentes)
+        existing = {norm(r["name"]) for r in base}
+    matched = [r for r in final if norm(r["name"]) in existing]
+    print(f"ofertas World Mobile: {len(final)} | casam com peças já existentes: {len(matched)} | peças novas: {len(final) - len(matched)}")
+    if skipped:
+        print("ignorados:", skipped)
+    conflicts = [g for g in dup if len({x["price"] for x in g}) > 1]
+    print(f"conflitos (mesma peça com preços diferentes na planilha, NÃO importados): {len(conflicts)}")
+    if a.relatorio:
+        with open(a.relatorio, "w", encoding="utf-8-sig", newline="") as f:
+            w = csv.writer(f, delimiter=";")
+            w.writerow(["situacao", "peca", "preco", "origem_na_planilha"])
+            for r in sorted(final, key=lambda x: (norm(x["name"]) in existing, x["name"])):
+                w.writerow(["JA EXISTIA" if norm(r["name"]) in existing else "NOVA", r["name"], f"{r['price']:.2f}".replace(".", ","), r["src"]])
+            for g in conflicts:
+                for x in g:
+                    w.writerow(["CONFLITO - NAO IMPORTADA", x["name"], f"{x['price']:.2f}".replace(".", ","), x["src"]])
 
 
 if __name__ == "__main__":
