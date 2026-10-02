@@ -11,3 +11,6 @@ next-env.d.ts
 npm-debug.log*
 .DS_Store
 coverage
+
+# listas de preços importadas (dados do negócio)
+imports/
