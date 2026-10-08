@@ -221,7 +221,7 @@ def build_sql(rows, date: str, suppliers: list[str], conflict: str = "min"):
         if len(prices) == 1 or conflict == "min":
             final.append(min(g, key=lambda x: x["price"]))
     values = ",\n".join(
-        f"  ({q(r['name'])}, {q(r.get('category', 'Tela'))}, {q(r['brand'])}, {q(r['tech'])}, {q(r['quality'])}, "
+        f"  ({q(r['name'])}, {q(r.get('category', 'Tela'))}, {q(r['brand'])}, {q(r.get('model'))}, {q(r['tech'])}, {q(r['quality'])}, "
         f"{q(r.get('notes'))}, {q(r['supplier'])}, {q(r.get('code'))}, {r['price']:.2f})"
         for r in final)
     sup_values = ", ".join(f"({q(s)})" for s in suppliers)
@@ -234,11 +234,11 @@ def build_sql(rows, date: str, suppliers: list[str], conflict: str = "min"):
 begin;
 
 create temp table _imp (
-  name text, category text, brand text, technology text, quality text, notes text,
+  name text, category text, brand text, device_model text, technology text, quality text, notes text,
   supplier text, supplier_code text, price numeric(12,2)
 ) on commit drop;
 
-insert into _imp (name, category, brand, technology, quality, notes, supplier, supplier_code, price) values
+insert into _imp (name, category, brand, device_model, technology, quality, notes, supplier, supplier_code, price) values
 {values};
 
 -- fornecedores
@@ -247,9 +247,9 @@ select v.n from (values {sup_values}) as v(n)
 where not exists (select 1 from public.suppliers s where lower(s.name) = lower(v.n));
 
 -- peças novas; as que já existem (mesmo nome, sem acento/pontuação) são reaproveitadas
-insert into public.parts (name, category_id, brand, technology, quality, notes)
+insert into public.parts (name, category_id, brand, device_model, technology, quality, notes)
 select distinct on (public.norm_text(i.name))
-       i.name, (select id from public.categories where lower(name) = lower(i.category)), i.brand, i.technology, i.quality, i.notes
+       i.name, (select id from public.categories where lower(name) = lower(i.category)), i.brand, i.device_model, i.technology, i.quality, i.notes
 from _imp i
 where not exists (select 1 from public.parts p where public.norm_text(p.name) = public.norm_text(i.name))
 order by public.norm_text(i.name);
