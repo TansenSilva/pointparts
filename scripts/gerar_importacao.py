@@ -222,7 +222,7 @@ def build_sql(rows, date: str, suppliers: list[str], conflict: str = "min"):
             final.append(min(g, key=lambda x: x["price"]))
     values = ",\n".join(
         f"  ({q(r['name'])}, {q(r.get('category', 'Tela'))}, {q(r['brand'])}, {q(r.get('model'))}, {q(r['tech'])}, {q(r['quality'])}, "
-        f"{q(r.get('notes'))}, {q(r['supplier'])}, {q(r.get('code'))}, {r['price']:.2f})"
+        f"{q(r.get('notes'))}, {q(r['supplier'])}, {q(r.get('code'))}, {q(r.get('offer_notes'))}, {r['price']:.2f})"
         for r in final)
     sup_values = ", ".join(f"({q(s)})" for s in suppliers)
     sql = f"""-- =============================================================================
@@ -235,10 +235,10 @@ begin;
 
 create temp table _imp (
   name text, category text, brand text, device_model text, technology text, quality text, notes text,
-  supplier text, supplier_code text, price numeric(12,2)
+  supplier text, supplier_code text, offer_notes text, price numeric(12,2)
 ) on commit drop;
 
-insert into _imp (name, category, brand, device_model, technology, quality, notes, supplier, supplier_code, price) values
+insert into _imp (name, category, brand, device_model, technology, quality, notes, supplier, supplier_code, offer_notes, price) values
 {values};
 
 -- fornecedores
@@ -255,14 +255,15 @@ where not exists (select 1 from public.parts p where public.norm_text(p.name) = 
 order by public.norm_text(i.name);
 
 -- ofertas (um preço por fornecedor); data da consulta = data da lista
-insert into public.supplier_parts (part_id, supplier_id, price, availability, supplier_code, checked_at)
-select p.id, s.id, i.price, 'in_stock', i.supplier_code, timestamptz '{date} 12:00:00-03'
+insert into public.supplier_parts (part_id, supplier_id, price, availability, supplier_code, notes, checked_at)
+select p.id, s.id, i.price, 'in_stock', i.supplier_code, i.offer_notes, timestamptz '{date} 12:00:00-03'
 from _imp i
 join public.suppliers s on lower(s.name) = lower(i.supplier)
 join lateral (select id from public.parts where public.norm_text(name) = public.norm_text(i.name) order by created_at limit 1) p on true
 on conflict (part_id, supplier_id) do update
   set price = excluded.price, availability = excluded.availability,
-      supplier_code = coalesce(excluded.supplier_code, public.supplier_parts.supplier_code), checked_at = excluded.checked_at;
+      supplier_code = coalesce(excluded.supplier_code, public.supplier_parts.supplier_code),
+      notes = coalesce(excluded.notes, public.supplier_parts.notes), checked_at = excluded.checked_at;
 
 commit;
 
