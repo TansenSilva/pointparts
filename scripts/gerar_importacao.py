@@ -221,7 +221,8 @@ def build_sql(rows, date: str, suppliers: list[str], conflict: str = "min"):
         if len(prices) == 1 or conflict == "min":
             final.append(min(g, key=lambda x: x["price"]))
     values = ",\n".join(
-        f"  ({q(r['name'])}, {q(r['brand'])}, {q(r['tech'])}, {q(r['quality'])}, {q(r['supplier'])}, {r['price']:.2f})"
+        f"  ({q(r['name'])}, {q(r.get('category', 'Tela'))}, {q(r['brand'])}, {q(r['tech'])}, {q(r['quality'])}, "
+        f"{q(r.get('notes'))}, {q(r['supplier'])}, {q(r.get('code'))}, {r['price']:.2f})"
         for r in final)
     sup_values = ", ".join(f"({q(s)})" for s in suppliers)
     sql = f"""-- =============================================================================
@@ -233,10 +234,11 @@ def build_sql(rows, date: str, suppliers: list[str], conflict: str = "min"):
 begin;
 
 create temp table _imp (
-  name text, brand text, technology text, quality text, supplier text, price numeric(12,2)
+  name text, category text, brand text, technology text, quality text, notes text,
+  supplier text, supplier_code text, price numeric(12,2)
 ) on commit drop;
 
-insert into _imp (name, brand, technology, quality, supplier, price) values
+insert into _imp (name, category, brand, technology, quality, notes, supplier, supplier_code, price) values
 {values};
 
 -- fornecedores
@@ -244,22 +246,23 @@ insert into public.suppliers (name)
 select v.n from (values {sup_values}) as v(n)
 where not exists (select 1 from public.suppliers s where lower(s.name) = lower(v.n));
 
--- peças novas (categoria "Tela"); as que já existem (mesmo nome, sem acento/pontuação) são reaproveitadas
-insert into public.parts (name, category_id, brand, technology, quality)
+-- peças novas; as que já existem (mesmo nome, sem acento/pontuação) são reaproveitadas
+insert into public.parts (name, category_id, brand, technology, quality, notes)
 select distinct on (public.norm_text(i.name))
-       i.name, (select id from public.categories where name = 'Tela'), i.brand, i.technology, i.quality
+       i.name, (select id from public.categories where lower(name) = lower(i.category)), i.brand, i.technology, i.quality, i.notes
 from _imp i
 where not exists (select 1 from public.parts p where public.norm_text(p.name) = public.norm_text(i.name))
 order by public.norm_text(i.name);
 
 -- ofertas (um preço por fornecedor); data da consulta = data da lista
-insert into public.supplier_parts (part_id, supplier_id, price, availability, checked_at)
-select p.id, s.id, i.price, 'in_stock', timestamptz '{date} 12:00:00-03'
+insert into public.supplier_parts (part_id, supplier_id, price, availability, supplier_code, checked_at)
+select p.id, s.id, i.price, 'in_stock', i.supplier_code, timestamptz '{date} 12:00:00-03'
 from _imp i
 join public.suppliers s on lower(s.name) = lower(i.supplier)
 join lateral (select id from public.parts where public.norm_text(name) = public.norm_text(i.name) order by created_at limit 1) p on true
 on conflict (part_id, supplier_id) do update
-  set price = excluded.price, availability = excluded.availability, checked_at = excluded.checked_at;
+  set price = excluded.price, availability = excluded.availability,
+      supplier_code = coalesce(excluded.supplier_code, public.supplier_parts.supplier_code), checked_at = excluded.checked_at;
 
 commit;
 
@@ -275,12 +278,14 @@ def main():
     ap.add_argument("xlsx")
     ap.add_argument("--data", required=True, help="data da lista, AAAA-MM-DD")
     ap.add_argument("--saida", required=True)
-    ap.add_argument("--lista", choices=["vibe_maritimo", "world_mobile"], default="vibe_maritimo")
+    ap.add_argument("--lista", choices=["vibe_maritimo", "world_mobile", "json"], default="vibe_maritimo")
     ap.add_argument("--existentes", help="xlsx Vibe/Marítimo, para informar quais peças da World Mobile já existem")
     ap.add_argument("--relatorio", help="CSV com o resultado do casamento de nomes (World Mobile)")
     a = ap.parse_args()
     if a.lista == "world_mobile":
         return main_wm(a)
+    if a.lista == "json":
+        return main_json(a)
     rows, ignored = parse_vibe_maritimo(a.xlsx)
     sql, final, dup = build_sql(rows, a.data, ["Vibe", "Marítimo"])
     open(a.saida, "w", encoding="utf-8").write(sql)
@@ -293,6 +298,20 @@ def main():
         print(f"  {s}: {sum(1 for r in final if r['supplier'] == s)} ofertas")
     for g in dup:
         print(f"  duplicado ({g[0]['name']} / {g[0]['supplier']}): {sorted({x['price'] for x in g})} -> vale o menor")
+
+
+def main_json(a):
+    """Lista já estruturada em JSON: [{name, supplier, price, category, brand, quality, code, notes}, ...]"""
+    import json
+    rows = json.load(open(a.xlsx, encoding="utf-8"))
+    for r in rows:
+        r.setdefault("brand", None); r.setdefault("tech", None); r.setdefault("quality", None)
+    suppliers = sorted({r["supplier"] for r in rows})
+    sql, final, dup = build_sql(rows, a.data, suppliers)
+    open(a.saida, "w", encoding="utf-8").write(sql)
+    print(f"ofertas: {len(final)} | peças: {len({norm(r['name']) for r in final})} | fornecedores: {', '.join(suppliers)}")
+    for g in dup:
+        print(f"  duplicado ({g[0]['name']}): {sorted({x['price'] for x in g})} -> vale o menor")
 
 
 def main_wm(a):

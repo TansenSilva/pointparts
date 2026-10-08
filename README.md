@@ -66,6 +66,7 @@ As migrations estão em `supabase/migrations/` e devem rodar **nesta ordem**:
 | 1 | `20260101000001_schema.sql` | Extensões (`pg_trgm`, `unaccent`), tabelas, índices, triggers (histórico de preços, `search_text`, `updated_at`), categorias e configuração iniciais |
 | 2 | `20260101000002_rls.sql` | Ativa RLS em todas as tabelas e cria as políticas |
 | 3 | `20260101000003_functions.sql` | Pesquisa (`search_parts`), peças semelhantes, cadastro rápido, dashboard e view de histórico |
+| 4 | `20260101000004_search_notes.sql` | A pesquisa passa a considerar também as observações da peça (ex.: aparelhos compatíveis) |
 | – | `supabase/seed.sql` | *(opcional)* dados de exemplo — fornecedores Alfa/Beta/Gama/Delta, Tela Soft OLED iPhone 15, Bateria iPhone 13, Tela Incell iPhone 11, Conector de carga Galaxy A54, Tela OLED Galaxy S23… |
 
 **Opção A — SQL Editor (mais simples):** no painel do Supabase abra **SQL Editor → New query**, cole o conteúdo de cada
