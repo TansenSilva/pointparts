@@ -246,6 +246,12 @@ insert into public.suppliers (name)
 select v.n from (values {sup_values}) as v(n)
 where not exists (select 1 from public.suppliers s where lower(s.name) = lower(v.n));
 
+-- categorias novas (ex.: Carregador, Cabo) são criadas se ainda não existirem
+insert into public.categories (name)
+select distinct i.category from _imp i
+where i.category is not null
+  and not exists (select 1 from public.categories c where lower(c.name) = lower(i.category));
+
 -- peças novas; as que já existem (mesmo nome, sem acento/pontuação) são reaproveitadas
 insert into public.parts (name, category_id, brand, device_model, technology, quality, notes)
 select distinct on (public.norm_text(i.name))
