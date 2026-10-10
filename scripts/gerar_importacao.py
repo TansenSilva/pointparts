@@ -222,7 +222,8 @@ def build_sql(rows, date: str, suppliers: list[str], conflict: str = "min"):
             final.append(min(g, key=lambda x: x["price"]))
     values = ",\n".join(
         f"  ({q(r['name'])}, {q(r.get('category', 'Tela'))}, {q(r['brand'])}, {q(r.get('model'))}, {q(r['tech'])}, {q(r['quality'])}, "
-        f"{q(r.get('notes'))}, {q(r['supplier'])}, {q(r.get('code'))}, {q(r.get('offer_notes'))}, {r['price']:.2f})"
+        f"{q(r.get('notes'))}, {q(r['supplier'])}, {q(r.get('code'))}, {q(r.get('offer_notes'))}, "
+        f"{q(r.get('availability', 'in_stock'))}, {q(r.get('date'))}, {r['price']:.2f})"
         for r in final)
     sup_values = ", ".join(f"({q(s)})" for s in suppliers)
     sql = f"""-- =============================================================================
@@ -233,12 +234,15 @@ def build_sql(rows, date: str, suppliers: list[str], conflict: str = "min"):
 -- =============================================================================
 begin;
 
+-- evita que duas execuções simultâneas criem peças duplicadas
+select pg_advisory_xact_lock(hashtext('pointparts_import'));
+
 create temp table _imp (
   name text, category text, brand text, device_model text, technology text, quality text, notes text,
-  supplier text, supplier_code text, offer_notes text, price numeric(12,2)
+  supplier text, supplier_code text, offer_notes text, availability text, checked text, price numeric(12,2)
 ) on commit drop;
 
-insert into _imp (name, category, brand, device_model, technology, quality, notes, supplier, supplier_code, offer_notes, price) values
+insert into _imp (name, category, brand, device_model, technology, quality, notes, supplier, supplier_code, offer_notes, availability, checked, price) values
 {values};
 
 -- fornecedores
@@ -260,16 +264,35 @@ from _imp i
 where not exists (select 1 from public.parts p where public.norm_text(p.name) = public.norm_text(i.name))
 order by public.norm_text(i.name);
 
+-- índice temporário nome normalizado -> peça (uma só leitura da tabela de peças)
+create temp table _pn on commit drop as
+select distinct on (n) id, n
+from (select id, public.norm_text(name) as n, created_at from public.parts) x
+order by n, created_at;
+
 -- ofertas (um preço por fornecedor); data da consulta = data da lista
+-- (o gatilho que atualiza a busca a cada oferta é pausado para ser rápido; a busca é recalculada no final)
+alter table public.supplier_parts disable trigger supplier_parts_refresh_part;
+
 insert into public.supplier_parts (part_id, supplier_id, price, availability, supplier_code, notes, checked_at)
-select p.id, s.id, i.price, 'in_stock', i.supplier_code, i.offer_notes, timestamptz '{date} 12:00:00-03'
+select p.id, s.id, i.price, coalesce(i.availability, 'in_stock'), i.supplier_code, i.offer_notes,
+       coalesce((i.checked || ' 12:00:00-03')::timestamptz, timestamptz '{date} 12:00:00-03')
 from _imp i
 join public.suppliers s on lower(s.name) = lower(i.supplier)
-join lateral (select id from public.parts where public.norm_text(name) = public.norm_text(i.name) order by created_at limit 1) p on true
+join _pn p on p.n = public.norm_text(i.name)
 on conflict (part_id, supplier_id) do update
   set price = excluded.price, availability = excluded.availability,
       supplier_code = coalesce(excluded.supplier_code, public.supplier_parts.supplier_code),
       notes = coalesce(excluded.notes, public.supplier_parts.notes), checked_at = excluded.checked_at;
+
+alter table public.supplier_parts enable trigger supplier_parts_refresh_part;
+
+-- recalcula o texto de busca só das peças que receberam código de fornecedor
+update public.parts p set name = p.name
+ where p.id in (select sp.part_id from public.supplier_parts sp
+                  join public.suppliers s on s.id = sp.supplier_id
+                  join _imp i on lower(s.name) = lower(i.supplier)
+                 where i.supplier_code is not null and sp.supplier_code is not null);
 
 commit;
 
@@ -288,6 +311,7 @@ def main():
     ap.add_argument("--lista", choices=["vibe_maritimo", "world_mobile", "json"], default="vibe_maritimo")
     ap.add_argument("--existentes", help="xlsx Vibe/Marítimo, para informar quais peças da World Mobile já existem")
     ap.add_argument("--relatorio", help="CSV com o resultado do casamento de nomes (World Mobile)")
+    ap.add_argument("--max-linhas", type=int, default=0, help="divide a saída em vários arquivos (modo json)")
     a = ap.parse_args()
     if a.lista == "world_mobile":
         return main_wm(a)
@@ -308,17 +332,27 @@ def main():
 
 
 def main_json(a):
-    """Lista já estruturada em JSON: [{name, supplier, price, category, brand, quality, code, notes}, ...]"""
+    """Lista já estruturada em JSON: [{name, supplier, price, category, brand, quality, code, notes, availability, date}, ...]"""
     import json
     rows = json.load(open(a.xlsx, encoding="utf-8"))
     for r in rows:
         r.setdefault("brand", None); r.setdefault("tech", None); r.setdefault("quality", None)
     suppliers = sorted({r["supplier"] for r in rows})
-    sql, final, dup = build_sql(rows, a.data, suppliers)
-    open(a.saida, "w", encoding="utf-8").write(sql)
+    # em duplicidade com preços diferentes a peça NÃO é importada para esse fornecedor (conflito)
+    _, final, dup = build_sql(rows, a.data, suppliers, conflict="exclude")
+    conflicts = [g for g in dup if len({x["price"] for x in g}) > 1]
+    n = getattr(a, "max_linhas", 0) or len(final) or 1
+    chunks = [final[i:i + n] for i in range(0, len(final), n)]
+    base = a.saida[:-4] if a.saida.endswith(".sql") else a.saida
+    for i, chunk in enumerate(chunks, 1):
+        out = a.saida if len(chunks) == 1 else f"{base}_parte{i}de{len(chunks)}.sql"
+        sql, _, _ = build_sql(chunk, a.data, suppliers)
+        open(out, "w", encoding="utf-8").write(sql)
+        print("gerado:", out, f"({len(chunk)} ofertas)")
     print(f"ofertas: {len(final)} | peças: {len({norm(r['name']) for r in final})} | fornecedores: {', '.join(suppliers)}")
-    for g in dup:
-        print(f"  duplicado ({g[0]['name']}): {sorted({x['price'] for x in g})} -> vale o menor")
+    print(f"duplicados com preços diferentes (não importados): {len(conflicts)}")
+    for g in conflicts[:15]:
+        print("  -", g[0]["name"], sorted({x["price"] for x in g}))
 
 
 def main_wm(a):
