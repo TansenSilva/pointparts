@@ -1,5 +1,6 @@
 -- =============================================================================
 -- PointParts — dados de exemplo (opcional)
+-- Execute após todas as migrations (inclusive fix_search_and_safe_seed).
 -- Pode ser executado várias vezes: se os dados de exemplo já existirem, nada é feito.
 -- =============================================================================
 do $$
@@ -85,4 +86,13 @@ begin
     (p2, s_beta,  200::numeric,  190::numeric, interval '1 day')
   ) as h(part_id, supplier_id, old_price, new_price, ago)
     on h.part_id = sp.part_id and h.supplier_id = sp.supplier_id;
+  -- Marca apenas os IDs criados NESTA execução. Nunca identifica exemplos por nome.
+  insert into pointparts_private.seed_records (entity, record_id, snapshot)
+  select 'parts', p.id, to_jsonb(p) from public.parts p where p.id in (p1,p2,p3,p4,p5,p6,p7)
+  union all
+  select 'suppliers', s.id, to_jsonb(s) from public.suppliers s where s.id in (s_alfa,s_beta,s_gama,s_delta,s_eps)
+  union all
+  select 'supplier_parts', sp.id, to_jsonb(sp) from public.supplier_parts sp where sp.part_id in (p1,p2,p3,p4,p5,p6,p7)
+  union all
+  select 'price_history', h.id, to_jsonb(h) from public.price_history h where h.part_id in (p1,p2,p3,p4,p5,p6,p7);
 end $$;

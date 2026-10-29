@@ -15,6 +15,10 @@ describe("parsePrice", () => {
     expect(parsePrice("")).toBeNull();
     expect(parsePrice("abc")).toBeNull();
   });
+  it.each(["-50,00", "+50", "1a2", "R$ -50", "1,2,3", "12.34.56", "1.23,45", "12,345", "1 2", "50 reais"])(
+    "rejeita entrada inválida %s sem mudar seu significado",
+    (input) => expect(parsePrice(input)).toBeNull(),
+  );
 });
 
 describe("formatBRL", () => {

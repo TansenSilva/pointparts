@@ -67,7 +67,10 @@ As migrations estão em `supabase/migrations/` e devem rodar **nesta ordem**:
 | 2 | `20260101000002_rls.sql` | Ativa RLS em todas as tabelas e cria as políticas |
 | 3 | `20260101000003_functions.sql` | Pesquisa (`search_parts`), peças semelhantes, cadastro rápido, dashboard e view de histórico |
 | 4 | `20260101000004_search_notes.sql` | A pesquisa passa a considerar também as observações da peça (ex.: aparelhos compatíveis) |
+| 5 | `20261029231120_fix_search_and_safe_seed.sql` | Corrige filtros por fornecedor/estoque, retorna a data da melhor oferta, oculta inativas por padrão e cria o registro privado dos exemplos |
 | – | `supabase/seed.sql` | *(opcional)* dados de exemplo — fornecedores Alfa/Beta/Gama/Delta, Tela Soft OLED iPhone 15, Bateria iPhone 13, Tela Incell iPhone 11, Conector de carga Galaxy A54, Tela OLED Galaxy S23… |
+
+**Atualização de uma instalação existente:** execute somente a migration 5 depois das quatro anteriores e publique o código desta revisão. Ela não apaga cadastros, ofertas nem histórico. O novo campo `best_checked_at` é a data da oferta destacada; `last_checked_at` continua sendo a consulta mais recente entre as ofertas elegíveis. A tela de gestão de peças permite listar todas/inativas, enquanto as consultas de compra mostram somente ativas.
 
 **Opção A — SQL Editor (mais simples):** no painel do Supabase abra **SQL Editor → New query**, cole o conteúdo de cada
 arquivo, na ordem acima, e clique em **Run**. Rode o `seed.sql` por último se quiser os dados de exemplo
@@ -102,6 +105,22 @@ Não é necessário configurar URLs de redirecionamento no Supabase, pois o logi
 | `npm run lint` | ESLint |
 | `npm run typecheck` | TypeScript (`tsc --noEmit`) |
 | `npm test` | testes unitários (Vitest): formatação, preço, ranking de melhor oferta |
+| `npm run test:db` | migrations, pesquisa, RLS, limpeza segura e importação em PostgreSQL isolado (PGlite; não conecta à produção) |
+
+## Importação de listas e limpeza dos exemplos
+
+O importador exige Python 3.10+ e `pip install -r scripts/requirements.txt`. Os testes de banco também usam Python para verificar o SQL real produzido pelo importador. No Windows, usa `python`; em outros sistemas, `python3`. É possível escolher o executável pela variável `PYTHON`.
+
+```bash
+python scripts/gerar_importacao.py lista.xlsx --data 2026-10-20 --saida imports/lista.sql
+python -m unittest discover -s scripts -p 'test_*.py'
+```
+
+- Uma lista só atualiza uma oferta se sua data de consulta for igual ou posterior à já cadastrada. Listas antigas não substituem preço, estoque ou data de consultas mais recentes e não geram alteração no histórico. Datas de lista sem horário representam meio-dia de Brasília; uma consulta manual posterior nesse dia fica preservada.
+- Preços inválidos (negativos, letras misturadas ou separadores malformados) não são convertidos silenciosamente. `45.90`, `45,90` e `R$ 45,90` são aceitos. Datas devem ser `AAAA-MM-DD`.
+- O seed atualizado registra os IDs e uma cópia dos exemplos em `pointparts_private.seed_records`, sem acesso pela API do aplicativo. A limpeza só remove exemplos identificados e intactos, preservando registros editados e peças/fornecedores com vínculos ou históricos reais.
+- **Exemplos antigos sem essa identificação ficam preservados.** A limpeza não tenta reconhecê-los pelo nome, pois nomes como “Bateria iPhone 13” também podem pertencer a cadastros reais. Não é necessário executar seed nem limpeza para atualizar o aplicativo.
+- SQLs de importação gerados antes desta correção devem ser gerados novamente para receber a proteção por data.
 
 ## Estrutura do projeto
 
@@ -142,7 +161,7 @@ fornecedores, normalizada com `unaccent` + minúsculas. A função `search_parts
 apareça no texto (`LIKE '%palavra%'`, qualquer ordem), com índice **GIN `pg_trgm`** para acelerar. Isso entrega
 exatamente o comportamento pedido (`iphone 15 oled`, `s23 bateria`) e é mais previsível para códigos/modelos do que
 o *full-text search* (`tsvector`), cujo stemming e stop-words atrapalham termos como "A54" ou "15 pro max".
-A mesma função aplica filtros, ordenação, paginação e já devolve o melhor preço (1 chamada por tela).
+A mesma função aplica filtros, ordenação, paginação e já devolve o melhor preço (1 chamada por tela). Fornecedor e disponibilidade precisam corresponder à mesma oferta; preço e contagens também respeitam esses filtros.
 
 ### Melhor preço
 Entre fornecedores **ativos**, vale o menor preço dentre os **Em estoque**. Se ninguém tiver estoque, considera
@@ -184,6 +203,10 @@ Service worker/modo offline ficam para uma etapa futura.
   criar/editar fornecedor, criar peça com 4 fornecedores, pesquisa parcial, ordenação por menor preço, destaque de
   "MELHOR PREÇO", alteração rápida de preço, histórico do preço anterior, fornecedor sem estoque, filtros, categorias,
   configuração de dias, confirmação de exclusão e ausência de rolagem horizontal no celular.
-  > Esses testes ponta a ponta rodaram contra o PostgreSQL real **com um servidor local que imita a API do Supabase**
+  > Os testes ponta a ponta descritos acima são da validação original e não foram repetidos nesta revisão. Esses testes rodaram contra o PostgreSQL real **com um servidor local que imita a API do Supabase**
   > (o ambiente de desenvolvimento não alcança o Supabase). Faça um teste de fumaça no seu projeto real após o deploy
   > (criar peça → pesquisar → alterar preço) e me avise se algo se comportar diferente.
+
+### Cobertura automatizada da revisão
+
+`npm run test:db` aplica as migrations reais em PostgreSQL embarcado (PGlite), com as extensões `pg_trgm` e `unaccent`. Apenas a infraestrutura do Supabase Auth é representada por um schema mínimo de teste. A suíte cobre filtros combinados, data da melhor oferta, peças ativas/inativas, permissões de `anon`/`authenticated`, limpeza sem perda de cadastros reais e importações fora de ordem. Não usa credenciais nem altera o Supabase em produção.

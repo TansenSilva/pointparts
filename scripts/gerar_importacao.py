@@ -15,6 +15,8 @@ O script é reexecutável: preços diferentes atualizam a oferta (e geram histó
 """
 import argparse, re, sys, unicodedata
 from collections import defaultdict
+from datetime import date as calendar_date
+from decimal import Decimal, InvalidOperation
 import openpyxl
 
 BRANDS = {
@@ -118,15 +120,43 @@ WM_HEADERS = [
 ]
 
 
-def wm_price(v):
-    if isinstance(v, (int, float)) and not isinstance(v, bool):
-        return float(v) if v > 0 else None
+def parse_price(v):
+    """Preço completo e não negativo; nunca extrai um número de texto inválido."""
+    if isinstance(v, bool) or v is None:
+        return None
     if isinstance(v, str):
-        m = re.search(r"(\d[\d.]*,\d{2}|\d+)", v)
-        if m:
-            n = float(m.group(1).replace(".", "").replace(",", "."))
-            return n if n > 0 else None
-    return None
+        s = re.sub(r"^R\$\s*", "", v.strip(), flags=re.I)
+        if "," in s:
+            if not re.fullmatch(r"(?:\d+|\d{1,3}(?:\.\d{3})+),\d{1,2}", s):
+                return None
+            s = s.replace(".", "").replace(",", ".")
+        elif re.fullmatch(r"\d{1,3}(?:\.\d{3})+", s):
+            s = s.replace(".", "")
+        elif not re.fullmatch(r"\d+(?:\.\d{1,2})?", s):
+            return None
+    elif isinstance(v, (int, float, Decimal)):
+        s = str(v)
+    else:
+        return None
+    try:
+        n = Decimal(s)
+        if not n.is_finite() or n < 0 or n >= Decimal("10000000000"):
+            return None
+        return n.quantize(Decimal("0.01"))
+    except InvalidOperation:
+        return None
+
+
+def wm_price(v):
+    n = parse_price(v)
+    return float(n) if n is not None and n > 0 else None
+
+
+def import_date(value: str) -> str:
+    """Valida antes de interpolar datas no SQL (inclusive as datas por linha)."""
+    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise ValueError("Data inválida: use AAAA-MM-DD")
+    return calendar_date.fromisoformat(value).isoformat()
 
 
 def wm_models(raw: str, brand: str | None) -> list[str]:
@@ -205,11 +235,19 @@ def q(v):
 
 
 def build_sql(rows, date: str, suppliers: list[str], conflict: str = "min"):
+    date = import_date(date)
     # um preço por (peça, fornecedor). Em duplicidade com preços diferentes:
     #   conflict="min"     -> vale o menor
     #   conflict="exclude" -> a peça NÃO é importada para esse fornecedor (vai para o relatório)
     groups = defaultdict(list)
     for r in rows:
+        r = dict(r)
+        price = parse_price(r["price"])
+        if price is None:
+            raise ValueError(f"Preço inválido em {r['name']}: {r['price']!r}")
+        r["price"] = price
+        if r.get("date") is not None:
+            r["date"] = import_date(r["date"])
         groups[(norm(r["name"]), r["supplier"])].append(r)
     final, dup = [], []
     for k, g in groups.items():
@@ -220,6 +258,8 @@ def build_sql(rows, date: str, suppliers: list[str], conflict: str = "min"):
         dup.append(g)
         if len(prices) == 1 or conflict == "min":
             final.append(min(g, key=lambda x: x["price"]))
+    if not final:
+        return "-- Nenhuma oferta válida para importar; nenhum dado foi alterado.\n", final, dup
     values = ",\n".join(
         f"  ({q(r['name'])}, {q(r.get('category', 'Tela'))}, {q(r['brand'])}, {q(r.get('model'))}, {q(r['tech'])}, {q(r['quality'])}, "
         f"{q(r.get('notes'))}, {q(r['supplier'])}, {q(r.get('code'))}, {q(r.get('offer_notes'))}, "
@@ -283,7 +323,9 @@ join _pn p on p.n = public.norm_text(i.name)
 on conflict (part_id, supplier_id) do update
   set price = excluded.price, availability = excluded.availability,
       supplier_code = coalesce(excluded.supplier_code, public.supplier_parts.supplier_code),
-      notes = coalesce(excluded.notes, public.supplier_parts.notes), checked_at = excluded.checked_at;
+      notes = coalesce(excluded.notes, public.supplier_parts.notes), checked_at = excluded.checked_at
+  -- Lista antiga não substitui consulta/preço mais recente (nem gera histórico falso).
+  where excluded.checked_at >= public.supplier_parts.checked_at;
 
 alter table public.supplier_parts enable trigger supplier_parts_refresh_part;
 

@@ -32,7 +32,8 @@ export async function searchParts(p: PartSearchParams = {}) {
     p_quality: p.quality || null,
     p_supplier: p.supplier || null,
     p_availability: p.availability || null,
-    p_active: p.active ?? null,
+    // Consultas de compra ocultam inativas; a gestão passa null para listar todas.
+    p_active: p.active === undefined ? true : p.active,
     p_sort: p.sort ?? "name",
     p_limit: pageSize,
     p_offset: (page - 1) * pageSize,
