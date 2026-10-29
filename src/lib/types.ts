@@ -77,6 +77,7 @@ export interface PartSummary {
   best_supplier_id: string | null;
   best_supplier_name: string | null;
   best_availability: Availability | null;
+  best_checked_at: string | null;
   last_checked_at: string | null;
   oldest_checked_at: string | null;
   total_count: number;

@@ -107,7 +107,7 @@ function OtherPartButton({ part, active, onSelect }: { part: PartSummary; active
         <span className="block truncate text-sm font-medium">{part.name}</span>
         <span className="text-xs text-slate-500">{part.supplier_count} fornecedores</span>
       </span>
-      <PriceBadge value={part.best_price} best={part.in_stock_count > 0} />
+      <PriceBadge value={part.best_price} best={part.best_availability === "in_stock"} />
     </button>
   );
 }

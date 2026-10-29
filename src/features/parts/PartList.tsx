@@ -90,13 +90,13 @@ export function PartList() {
           <span className="text-slate-400">—</span>
         ) : (
           <span title={p.best_supplier_name ?? undefined}>
-            <PriceBadge value={p.best_price} best={p.in_stock_count > 0} size="sm" />
+            <PriceBadge value={p.best_price} best={p.best_availability === "in_stock"} size="sm" />
             <span className="block text-xs text-slate-500">{p.best_supplier_name}</span>
           </span>
         ),
     },
     { key: "count", header: "Forn.", align: "right", cell: (p) => p.supplier_count },
-    { key: "upd", header: "Atualizado", cell: (p) => <LastUpdatedBadge checkedAt={p.last_checked_at} staleDays={staleDays} showWarning={false} prefix="" /> },
+    { key: "upd", header: "Data do melhor preço", cell: (p) => <LastUpdatedBadge checkedAt={p.best_checked_at} staleDays={staleDays} showWarning={false} prefix="" /> },
   ];
 
   const sel = (key: keyof Filters, label: string, items: { value: string; label: string }[]) => (

@@ -7,14 +7,16 @@ export function formatBRL(value: number | null | undefined): string {
 
 /** Converte texto digitado ("1.349,90", "R$ 349", "349.9") em número. */
 export function parsePrice(input: string): number | null {
-  let s = input.replace(/[^\d.,]/g, "");
-  if (!s) return null;
+  let s = input.trim().replace(/^R\$\s*/i, "");
+  // Valida o texto inteiro antes de converter: não transforme -50 em 50 ou 1a2 em 12.
+  if (!s || !/^[\d.,]+$/.test(s)) return null;
   if (s.includes(",")) {
+    if (!/^(?:\d+|\d{1,3}(?:\.\d{3})+),\d{1,2}$/.test(s)) return null;
     s = s.replace(/\./g, "").replace(",", ".");
-  } else if ((s.match(/\./g) ?? []).length > 1) {
+  } else if (/^\d{1,3}(?:\.\d{3})+$/.test(s)) {
     s = s.replace(/\./g, "");
-  } else if (/^\d{1,3}\.\d{3}$/.test(s)) {
-    s = s.replace(".", "");
+  } else if (!/^\d+(?:\.\d{1,2})?$/.test(s)) {
+    return null;
   }
   const n = Number(s);
   if (!Number.isFinite(n)) return null;

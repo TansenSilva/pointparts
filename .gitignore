@@ -11,6 +11,9 @@ next-env.d.ts
 npm-debug.log*
 .DS_Store
 coverage
+__pycache__/
+*.pyc
+supabase/.temp/
 
 # listas de preços importadas (dados do negócio)
 imports/

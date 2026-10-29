@@ -46,13 +46,13 @@ function Summary({ part, staleDays }: { part: PartSummary; staleDays: number }) 
       {hasOffers ? (
         <div className="w-full sm:w-auto sm:text-right">
           <p className="text-[11px] uppercase tracking-wide text-slate-500">
-            {part.in_stock_count > 0 ? "Melhor preço" : "Menor preço (sem estoque confirmado)"}
+            {part.best_availability === "in_stock" ? "Melhor preço" : "Menor preço (sem estoque confirmado)"}
           </p>
-          <PriceBadge value={part.best_price} best={part.in_stock_count > 0} size="lg" />
+          <PriceBadge value={part.best_price} best={part.best_availability === "in_stock"} size="lg" />
           <p className="text-xs text-slate-500">
             {part.best_supplier_name} · {part.supplier_count} {part.supplier_count === 1 ? "fornecedor" : "fornecedores"}
           </p>
-          <LastUpdatedBadge checkedAt={part.last_checked_at} staleDays={staleDays} plain className="mt-0.5" />
+          <LastUpdatedBadge checkedAt={part.best_checked_at} staleDays={staleDays} plain className="mt-0.5" />
         </div>
       ) : (
         <p className="text-sm text-slate-500">Nenhum fornecedor cadastrado</p>
