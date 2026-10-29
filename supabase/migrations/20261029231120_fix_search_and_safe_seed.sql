@@ -2,6 +2,16 @@
 -- A alteração do retorno exige recriar a função; tudo ocorre na mesma transação.
 begin;
 
+-- '+' faz parte do modelo: XS e XS+ não são a mesma peça.
+create or replace function public.norm_text(t text)
+returns text
+language sql
+stable
+set search_path = public, extensions
+as $$
+  select trim(regexp_replace(lower(extensions.unaccent(replace(coalesce(t, ''), '+', ' plus '))), '[^a-z0-9]+', ' ', 'g'));
+$$;
+
 drop function public.search_parts(text, uuid, text, text, text, text, uuid, text, boolean, text, int, int);
 
 create or replace function public.search_parts(
@@ -126,6 +136,9 @@ create table pointparts_private.seed_records (
 );
 alter table pointparts_private.seed_records enable row level security;
 revoke all on pointparts_private.seed_records from public, anon, authenticated;
+
+-- Recalcula a busca para os modelos com '+' já existentes.
+update public.parts set name = name;
 
 notify pgrst, 'reload schema';
 commit;

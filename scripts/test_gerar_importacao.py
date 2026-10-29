@@ -1,10 +1,14 @@
 import unittest
 from decimal import Decimal
 
-from gerar_importacao import build_sql, import_date, parse_price, wm_price
+from gerar_importacao import build_sql, import_date, norm, parse_price, wm_price
 
 
 class PriceParsingTests(unittest.TestCase):
+    def test_plus_is_part_of_the_model(self):
+        self.assertNotEqual(norm('iPhone XS+'), norm('iPhone XS'))
+        self.assertEqual(norm('iPhone XS+'), norm('iPhone XS Plus'))
+
     def test_valid_prices(self):
         for value, expected in [("R$ 45,00", "45"), ("45.90", "45.90"),
                                 ("1.349,90", "1349.90"), ("1.349", "1349"),

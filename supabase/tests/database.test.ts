@@ -71,6 +71,15 @@ async function search(args = "", params: unknown[] = []) {
 }
 
 describe("pesquisa real no PostgreSQL", () => {
+  it("preserva a distinção entre modelos com e sem +", async () => {
+    const plus = await part('Tela iPhone XS+');
+    await part('Tela iPhone XS');
+    expect((await search("p_query => 'xs+'" )).map((r) => r.id)).toEqual([plus]);
+    const rows = (await db.query<{ a: string; b: string; c: string }>("select public.norm_text('XS+') a, public.norm_text('XS') b, public.norm_text('XS Plus') c")).rows;
+    expect(rows[0].a).not.toBe(rows[0].b);
+    expect(rows[0].a).toBe(rows[0].c);
+  });
+
   it("combina fornecedor e estoque na mesma oferta", async () => {
     const p = await part();
     const a = await supplier("A");

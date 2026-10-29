@@ -120,7 +120,7 @@ python -m unittest discover -s scripts -p 'test_*.py'
 - Preços inválidos (negativos, letras misturadas ou separadores malformados) não são convertidos silenciosamente. `45.90`, `45,90` e `R$ 45,90` são aceitos. Datas devem ser `AAAA-MM-DD`.
 - O seed atualizado registra os IDs e uma cópia dos exemplos em `pointparts_private.seed_records`, sem acesso pela API do aplicativo. A limpeza só remove exemplos identificados e intactos, preservando registros editados e peças/fornecedores com vínculos ou históricos reais.
 - **Exemplos antigos sem essa identificação ficam preservados.** A limpeza não tenta reconhecê-los pelo nome, pois nomes como “Bateria iPhone 13” também podem pertencer a cadastros reais. Não é necessário executar seed nem limpeza para atualizar o aplicativo.
-- SQLs de importação gerados antes desta correção devem ser gerados novamente para receber a proteção por data.
+- SQLs de importação gerados antes desta correção devem ser gerados novamente para receber a proteção por data. A normalização preserva o sinal `+` como `plus`, para não confundir modelos diferentes como XS e XS+.
 
 ## Estrutura do projeto
 

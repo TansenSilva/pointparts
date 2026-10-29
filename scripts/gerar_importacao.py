@@ -28,6 +28,8 @@ NO_BRAND_SECTIONS = {"TOUCH", "LCD", "TABLET"}
 
 
 def norm(s: str) -> str:
+    # '+' distingue modelos (ex.: XS e XS+); não pode sumir como pontuação.
+    s = s.replace('+', ' plus ')
     s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().lower()
     return re.sub(r"[^a-z0-9]+", " ", s).strip()
 
