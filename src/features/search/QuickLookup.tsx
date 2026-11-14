@@ -19,7 +19,7 @@ import { SEARCH_DEBOUNCE_MS } from "@/lib/constants";
 import { whatsappUrl } from "@/lib/format";
 import { useDebounce } from "@/lib/hooks/use-debounce";
 import { useQuery } from "@/lib/hooks/use-query";
-import { pickBestOffer } from "@/lib/offers";
+import { pickAvailableOffer } from "@/lib/offers";
 import { listOffersForPart } from "@/lib/queries/offers";
 import { searchParts } from "@/lib/queries/parts";
 import type { Offer, PartSummary } from "@/lib/types";
@@ -40,7 +40,7 @@ export function QuickLookup() {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <PageHeader title="Consulta rápida" description="Digite a peça e veja na hora quem tem e quem vende mais barato." />
+      <PageHeader title="Consulta rápida" description="Compare o preço de cada fornecedor, a disponibilidade informada e a data da consulta." />
       <SearchBar value={q} onChange={setQ} loading={searching && q.trim().length > 0} autoFocus size="lg" placeholder="Pesquise uma peça..." />
 
       <div className="mt-5">
@@ -57,7 +57,7 @@ export function QuickLookup() {
           </div>
         ) : results.error ? (
           <ErrorState message={results.error} onRetry={results.reload} />
-        ) : !results.data ? (
+        ) : !results.data || searching ? (
           <LoadingState rows={2} label="Pesquisando" />
         ) : rows.length === 0 ? (
           <EmptyState
@@ -107,14 +107,14 @@ function OtherPartButton({ part, active, onSelect }: { part: PartSummary; active
         <span className="block truncate text-sm font-medium">{part.name}</span>
         <span className="text-xs text-slate-500">{part.supplier_count} fornecedores</span>
       </span>
-      <PriceBadge value={part.best_price} best={part.best_availability === "in_stock"} />
+      <PriceBadge value={part.best_price} />
     </button>
   );
 }
 
 function SelectedPart({ part, staleDays }: { part: PartSummary; staleDays: number }) {
   const offers = useQuery(() => listOffersForPart(part.id), [part.id]);
-  const best = offers.data ? pickBestOffer(offers.data) : null;
+  const best = offers.data ? pickAvailableOffer(offers.data, staleDays) : null;
 
   return (
     <section className="space-y-3" aria-label={part.name}>
@@ -136,8 +136,8 @@ function SelectedPart({ part, staleDays }: { part: PartSummary; staleDays: numbe
         <EmptyState title="Nenhum fornecedor cadastrado para esta peça" action={<LinkButton href={`/pecas/${part.id}`}>Adicionar fornecedores</LinkButton>} />
       ) : (
         <>
-          {best && <BestOfferPanel offer={best} staleDays={staleDays} />}
-          <OfferList offers={offers.data} staleDays={staleDays} />
+          {best ? <BestOfferPanel offer={best} staleDays={staleDays} /> : <p className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">Nenhum fornecedor ativo com estoque informado e consulta recente. Veja as ofertas abaixo e confirme a disponibilidade pelo WhatsApp.</p>}
+          <OfferList offers={offers.data} staleDays={staleDays} partName={part.name} />
         </>
       )}
     </section>
@@ -150,7 +150,7 @@ function BestOfferPanel({ offer, staleDays }: { offer: Offer; staleDays: number 
   return (
     <div className={cn("rounded-2xl border-2 p-4 md:p-5", inStock ? "border-emerald-500 bg-emerald-50" : "border-amber-400 bg-amber-50")}>
       <p className={cn("text-xs font-bold uppercase tracking-wide", inStock ? "text-emerald-700" : "text-amber-800")}>
-        {inStock ? "Melhor opção disponível" : "Nenhum fornecedor com estoque confirmado — menor preço"}
+        {inStock ? "Menor preço com estoque informado e consulta recente" : "Nenhum fornecedor com estoque confirmado — menor preço"}
       </p>
       <div className="mt-1 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
         <div>

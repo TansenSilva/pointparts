@@ -210,3 +210,15 @@ Service worker/modo offline ficam para uma etapa futura.
 ### Cobertura automatizada da revisão
 
 `npm run test:db` aplica as migrations reais em PostgreSQL embarcado (PGlite), com as extensões `pg_trgm` e `unaccent`. Apenas a infraestrutura do Supabase Auth é representada por um schema mínimo de teste. A suíte cobre filtros combinados, data da melhor oferta, peças ativas/inativas, permissões de `anon`/`authenticated`, limpeza sem perda de cadastros reais e importações fora de ordem. Não usa credenciais nem altera o Supabase em produção.
+
+## Comparação de fornecedores — revisão de novembro de 2026
+
+- A pesquisa abre as ofertas de cada resultado, com fornecedor, preço, disponibilidade e data. A consulta usa carregamento em lote e pagina todas as ofertas para não omitir fornecedores pelo limite da API.
+- Os filtros de fornecedor e disponibilidade são aplicados à mesma oferta tanto no resumo quanto na comparação. Cada comparação também permite mostrar apenas fornecedores ativos e consultas recentes.
+- Na consulta rápida, o destaque de compra exige fornecedor ativo, estoque informado e consulta dentro do prazo configurado. Ofertas antigas continuam visíveis para conferência, sem destaque de compra.
+- Listas de preços importadas passam a usar **Não informado** quando não trazem disponibilidade explícita. Esta mudança não altera retrospectivamente cadastros existentes: confira os estoques importados anteriormente e atualize cada oferta após contato com o fornecedor.
+- O WhatsApp na tabela abre uma mensagem com peça, código e preço, pedindo confirmação. A confirmação rápida na gestão confirma **preço e disponibilidade** juntos e atualiza a data.
+
+**Limite atual:** não há integração automática com sites, APIs ou estoque dos fornecedores. A disponibilidade representa o último registro manual ou importação, e deve ser confirmada antes da compra. Peças com nomes, tecnologia, qualidade ou aro diferentes podem ter cadastros separados; não são unificadas automaticamente para evitar comparar variantes incompatíveis.
+
+Esta revisão não exige migration SQL. Publique o código para ativar as mudanças na interface; use o importador atualizado nas próximas listas.

@@ -265,7 +265,7 @@ def build_sql(rows, date: str, suppliers: list[str], conflict: str = "min"):
     values = ",\n".join(
         f"  ({q(r['name'])}, {q(r.get('category', 'Tela'))}, {q(r['brand'])}, {q(r.get('model'))}, {q(r['tech'])}, {q(r['quality'])}, "
         f"{q(r.get('notes'))}, {q(r['supplier'])}, {q(r.get('code'))}, {q(r.get('offer_notes'))}, "
-        f"{q(r.get('availability', 'in_stock'))}, {q(r.get('date'))}, {r['price']:.2f})"
+        f"{q(r.get('availability') or 'unknown')}, {q(r.get('date'))}, {r['price']:.2f})"
         for r in final)
     sup_values = ", ".join(f"({q(s)})" for s in suppliers)
     sql = f"""-- =============================================================================
@@ -317,7 +317,7 @@ order by n, created_at;
 alter table public.supplier_parts disable trigger supplier_parts_refresh_part;
 
 insert into public.supplier_parts (part_id, supplier_id, price, availability, supplier_code, notes, checked_at)
-select p.id, s.id, i.price, coalesce(i.availability, 'in_stock'), i.supplier_code, i.offer_notes,
+select p.id, s.id, i.price, coalesce(i.availability, 'unknown'), i.supplier_code, i.offer_notes,
        coalesce((i.checked || ' 12:00:00-03')::timestamptz, timestamptz '{date} 12:00:00-03')
 from _imp i
 join public.suppliers s on lower(s.name) = lower(i.supplier)

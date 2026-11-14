@@ -11,7 +11,7 @@ import { LinkButton } from "@/components/ui/Button";
 import { cn } from "@/lib/cn";
 import { useQuery } from "@/lib/hooks/use-query";
 import { listOffersForPart } from "@/lib/queries/offers";
-import type { PartSummary } from "@/lib/types";
+import type { Offer, PartSummary } from "@/lib/types";
 
 interface Props {
   part: PartSummary;
@@ -19,6 +19,7 @@ interface Props {
   /** "expand": abre a comparação no próprio card. "link": leva à página da peça. */
   mode?: "expand" | "link";
   defaultOpen?: boolean;
+  prefetchedOffers?: Offer[];
 }
 
 export function PartMeta({ part }: { part: Pick<PartSummary, "category_name" | "brand" | "device_model" | "technology" | "quality"> }) {
@@ -46,9 +47,9 @@ function Summary({ part, staleDays }: { part: PartSummary; staleDays: number }) 
       {hasOffers ? (
         <div className="w-full sm:w-auto sm:text-right">
           <p className="text-[11px] uppercase tracking-wide text-slate-500">
-            {part.best_availability === "in_stock" ? "Melhor preço" : "Menor preço (sem estoque confirmado)"}
+            {part.best_availability === "in_stock" ? "Preço com estoque informado" : "Preço de referência — confirmar estoque"}
           </p>
-          <PriceBadge value={part.best_price} best={part.best_availability === "in_stock"} size="lg" />
+          <PriceBadge value={part.best_price} size="lg" />
           <p className="text-xs text-slate-500">
             {part.best_supplier_name} · {part.supplier_count} {part.supplier_count === 1 ? "fornecedor" : "fornecedores"}
           </p>
@@ -61,9 +62,10 @@ function Summary({ part, staleDays }: { part: PartSummary; staleDays: number }) 
   );
 }
 
-export function PartCard({ part, staleDays, mode = "expand", defaultOpen = false }: Props) {
+export function PartCard({ part, staleDays, mode = "expand", defaultOpen = false, prefetchedOffers }: Props) {
   const [open, setOpen] = useState(defaultOpen);
-  const offers = useQuery(() => listOffersForPart(part.id), [part.id], mode === "expand" && open);
+  const offers = useQuery(() => listOffersForPart(part.id), [part.id], mode === "expand" && open && prefetchedOffers === undefined);
+  const loadedOffers = prefetchedOffers ?? offers.data;
 
   if (mode === "link") {
     return (
@@ -90,10 +92,10 @@ export function PartCard({ part, staleDays, mode = "expand", defaultOpen = false
         <div className="border-t border-slate-100 p-3">
           {offers.error ? (
             <ErrorState message={offers.error} onRetry={offers.reload} />
-          ) : !offers.data ? (
+          ) : !loadedOffers ? (
             <LoadingState rows={3} label="Carregando fornecedores" />
           ) : (
-            <OfferList offers={offers.data} staleDays={staleDays} />
+            <OfferList offers={loadedOffers} staleDays={staleDays} partName={part.name} />
           )}
           <div className="mt-3 flex justify-end">
             <LinkButton href={`/pecas/${part.id}`} variant="secondary" size="sm" icon={<ExternalLink className="size-4" />}>

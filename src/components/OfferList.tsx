@@ -13,7 +13,7 @@ import { cn } from "@/lib/cn";
 import { AVAILABILITY_OPTIONS } from "@/lib/constants";
 import { friendlyError } from "@/lib/errors";
 import { formatBRL, priceToInput, whatsappUrl } from "@/lib/format";
-import { pickBestOffer, sortOffers } from "@/lib/offers";
+import { filterOffers, pickAvailableOffer, sortOffers } from "@/lib/offers";
 import { confirmOffer, quickUpdateOffer } from "@/lib/queries/offers";
 import type { Availability, Offer } from "@/lib/types";
 import { quickOfferSchema } from "@/lib/validation";
@@ -30,22 +30,41 @@ interface Props {
   staleDays: number;
   /** Habilita edição rápida, confirmação, detalhes e remoção. */
   manage?: ManageProps;
+  partName?: string;
 }
 
-const GRID = "grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 md:grid-cols-[minmax(0,1fr)_7rem_8rem_9.5rem_minmax(0,1.5fr)] md:items-center";
+const GRID = "grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 xl:grid-cols-[minmax(0,1fr)_7rem_8rem_9.5rem_minmax(0,1.5fr)] xl:items-center";
 
-export function OfferList({ offers, staleDays, manage }: Props) {
+export function OfferList({ offers, staleDays, manage, partName }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
-  const sorted = sortOffers(offers);
-  const best = pickBestOffer(offers);
+  const [availabilityFilter, setAvailabilityFilter] = useState("");
+  const [freshOnly, setFreshOnly] = useState(false);
+  const [activeOnly, setActiveOnly] = useState(false);
+  const sorted = sortOffers(filterOffers(offers, { availability: availabilityFilter, freshOnly, activeOnly }, staleDays));
+  const best = pickAvailableOffer(sorted, staleDays);
+  const availableCount = filterOffers(offers, { availability: "in_stock", activeOnly: true, freshOnly: true }, staleDays).length;
 
-  if (sorted.length === 0) {
+  if (offers.length === 0) {
     return <p className="py-4 text-center text-sm text-slate-500">Nenhum fornecedor vinculado a esta peça.</p>;
   }
 
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-      <div className={cn(GRID, "hidden border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500 md:grid")}>
+      <div className="space-y-2 border-b border-slate-200 bg-slate-50 p-3">
+        <p className="text-sm font-medium">{availableCount} com estoque informado e consulta recente · {offers.length} ofertas cadastradas</p>
+        <p className="text-xs text-slate-500">Dados cadastrados ou importados; confirme estoque e preço com o fornecedor antes de comprar.</p>
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <Select aria-label="Filtrar ofertas por disponibilidade" value={availabilityFilter} onChange={(e) => setAvailabilityFilter(e.target.value)} className="w-auto">
+            <option value="">Todas as disponibilidades</option>
+            {AVAILABILITY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
+          <label className="flex items-center gap-2"><input type="checkbox" checked={freshOnly} onChange={(e) => setFreshOnly(e.target.checked)} />Consultas recentes (até {staleDays} dias)</label>
+          <label className="flex items-center gap-2"><input type="checkbox" checked={activeOnly} onChange={(e) => setActiveOnly(e.target.checked)} />Somente fornecedores ativos</label>
+        </div>
+        <p className="text-xs text-slate-500">Mostrando {sorted.length} de {offers.length} ofertas. Ordem: disponibilidade e menor preço.</p>
+      </div>
+      {sorted.length === 0 && <p className="p-4 text-sm text-slate-500">Nenhuma oferta atende aos filtros. Altere os filtros para ver as demais.</p>}
+      <div className={cn(GRID, "hidden border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500 xl:grid")}>
         <span>Fornecedor</span>
         <span>Preço</span>
         <span>Estoque</span>
@@ -57,6 +76,7 @@ export function OfferList({ offers, staleDays, manage }: Props) {
           <OfferRow
             key={offer.id}
             offer={offer}
+            partName={partName}
             isBest={best?.id === offer.id}
             staleDays={staleDays}
             manage={manage}
@@ -70,6 +90,7 @@ export function OfferList({ offers, staleDays, manage }: Props) {
 }
 
 interface RowProps {
+  partName?: string;
   offer: Offer;
   isBest: boolean;
   staleDays: number;
@@ -78,13 +99,14 @@ interface RowProps {
   onEdit: (id: string | null) => void;
 }
 
-function OfferRow({ offer, isBest, staleDays, manage, editing, onEdit }: RowProps) {
+function OfferRow({ offer, isBest, staleDays, manage, editing, onEdit, partName }: RowProps) {
   const toast = useToast();
   const [price, setPrice] = useState(priceToInput(offer.price));
   const [availability, setAvailability] = useState<Availability>(offer.availability);
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
-  const wa = whatsappUrl(offer.supplier.whatsapp);
+  const waBase = whatsappUrl(offer.supplier.whatsapp);
+  const wa = waBase && partName ? `${waBase}?text=${encodeURIComponent(`Olá! Você tem ${partName}${offer.supplier_code ? ` (cód. ${offer.supplier_code})` : ""}? Vi o preço de ${formatBRL(offer.price)}. Pode confirmar o valor e a disponibilidade?`)}` : waBase;
   const inStockBest = isBest && offer.availability === "in_stock";
 
   function startEdit() {
@@ -117,7 +139,7 @@ function OfferRow({ offer, isBest, staleDays, manage, editing, onEdit }: RowProp
     setSaving(true);
     try {
       await confirmOffer(offer.id);
-      toast.success("Preço confirmado como atual");
+      toast.success("Preço e disponibilidade confirmados como atuais");
       manage?.onChanged();
     } catch (e) {
       toast.error(friendlyError(e));
@@ -130,7 +152,7 @@ function OfferRow({ offer, isBest, staleDays, manage, editing, onEdit }: RowProp
     <li
       className={cn(
         GRID,
-        "px-3 py-3 md:py-2.5",
+        "px-3 py-3 xl:py-2.5",
         inStockBest && "border-l-4 border-l-emerald-500 bg-emerald-50/60",
         !offer.supplier.active && "opacity-70",
       )}
@@ -141,7 +163,7 @@ function OfferRow({ offer, isBest, staleDays, manage, editing, onEdit }: RowProp
           <Link href={`/fornecedores/${offer.supplier.id}`} className="truncate font-medium text-slate-900 hover:text-brand-700">
             {offer.supplier.name}
           </Link>
-          {isBest && (inStockBest ? <BestPriceTag /> : <span className="rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">MENOR PREÇO</span>)}
+          {isBest && <BestPriceTag />}
           {!offer.supplier.active && <span className="rounded bg-slate-100 px-1.5 text-[11px] text-slate-500">Inativo</span>}
         </div>
         {(offer.supplier_code || offer.notes) && (
@@ -154,7 +176,7 @@ function OfferRow({ offer, isBest, staleDays, manage, editing, onEdit }: RowProp
       </div>
 
       {editing ? (
-        <div className="col-span-2 flex flex-wrap items-start gap-2 md:col-span-3">
+        <div className="col-span-2 flex flex-wrap items-start gap-2 xl:col-span-3">
           <div>
             <Input
               autoFocus
@@ -193,18 +215,18 @@ function OfferRow({ offer, isBest, staleDays, manage, editing, onEdit }: RowProp
         </div>
       ) : (
         <>
-          <div className="text-right md:text-left">
+          <div className="text-right xl:text-left">
             <PriceBadge value={offer.price} best={inStockBest} muted={offer.availability === "out_of_stock"} size="lg" />
           </div>
-          <div className="col-span-2 flex flex-wrap items-center justify-between gap-2 md:col-span-2 md:contents">
-            <AvailabilityBadge value={offer.availability} className="md:justify-self-start" />
+          <div className="col-span-2 flex flex-wrap items-center justify-between gap-2 xl:col-span-2 xl:contents">
+            <AvailabilityBadge value={offer.availability} className="xl:justify-self-start" />
             <LastUpdatedBadge checkedAt={offer.checked_at} staleDays={staleDays} />
           </div>
         </>
       )}
 
       {/* Ações */}
-      <div className="col-span-2 flex flex-wrap items-center gap-1.5 md:col-span-1 md:flex-nowrap md:justify-end">
+      <div className="col-span-2 flex flex-wrap items-center gap-1.5 xl:col-span-1 xl:flex-nowrap xl:justify-end">
         {!editing && (
           <>
             {manage && (
@@ -229,7 +251,7 @@ function OfferRow({ offer, isBest, staleDays, manage, editing, onEdit }: RowProp
                 className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
               >
                 <Store className="size-3.5" aria-hidden />
-                <span className="md:sr-only">Fornecedor</span>
+                <span className="xl:sr-only">Fornecedor</span>
               </Link>
             )}
             {!manage && offer.supplier.website && (
@@ -239,7 +261,7 @@ function OfferRow({ offer, isBest, staleDays, manage, editing, onEdit }: RowProp
             )}
             {manage && (
               <>
-                <Button size="sm" variant="ghost" onClick={confirm} disabled={saving} title="Preço continua o mesmo (atualiza a data)" aria-label="Confirmar preço">
+                <Button size="sm" variant="ghost" onClick={confirm} disabled={saving} title="Conferi preço e disponibilidade: continuam iguais (atualiza a data)" aria-label="Confirmar preço e disponibilidade">
                   <Check className="size-4" />
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => manage.onEditDetails(offer)} title="Código, link e observações" aria-label="Detalhes">

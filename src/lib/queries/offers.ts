@@ -9,9 +9,16 @@ const OFFER_SELECT = "*, supplier:suppliers(id, name, whatsapp, website, active)
 /** Ofertas (com dados do fornecedor) de várias peças de uma vez. */
 export async function listOffersForParts(partIds: string[]) {
   if (partIds.length === 0) return {} as Record<string, Offer[]>;
-  const res = await createClient().from("supplier_parts").select(OFFER_SELECT).in("part_id", partIds);
   const grouped: Record<string, Offer[]> = {};
-  for (const offer of unwrap<Offer[]>(res)) (grouped[offer.part_id] ??= []).push(offer);
+  // Paginação explícita: o limite da API não pode esconder fornecedores na comparação.
+  const batchSize = 500;
+  for (let offset = 0; ; offset += batchSize) {
+    const res = await createClient().from("supplier_parts").select(OFFER_SELECT)
+      .in("part_id", partIds).order("id").range(offset, offset + batchSize - 1);
+    const rows = unwrap<Offer[]>(res);
+    for (const offer of rows) (grouped[offer.part_id] ??= []).push(offer);
+    if (rows.length < batchSize) break;
+  }
   return grouped;
 }
 
