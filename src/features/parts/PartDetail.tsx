@@ -117,7 +117,7 @@ export function PartDetail({ id }: { id: string }) {
         ) : !offers.data ? (
           <LoadingState rows={3} label="Carregando fornecedores" />
         ) : (
-          <OfferList offers={offers.data} staleDays={staleDays} manage={{ onChanged: changed, onEditDetails: (offer) => setModal({ offer }), onRemove: setRemoving }} />
+          <OfferList offers={offers.data} staleDays={staleDays} partName={p.name} manage={{ onChanged: changed, onEditDetails: (offer) => setModal({ offer }), onRemove: setRemoving }} />
         )}
         <p className="mt-2 text-xs text-slate-500">
           Use <strong>Editar</strong> para alterar preço e disponibilidade rapidamente; a data e a hora da atualização são registradas ao salvar.

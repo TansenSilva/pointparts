@@ -41,6 +41,16 @@ class PriceParsingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_sql([row], "2026-10-01", ["A"])
 
+    def test_price_list_does_not_confirm_stock(self):
+        row = {"name": "Tela teste", "supplier": "A", "price": 50,
+               "brand": None, "tech": None, "quality": None}
+        sql, _, _ = build_sql([row], "2026-10-01", ["A"])
+        self.assertIn("'unknown'", sql)
+        self.assertNotIn("'in_stock'", sql)
+        row["availability"] = "in_stock"
+        sql, _, _ = build_sql([row], "2026-10-01", ["A"])
+        self.assertIn("'in_stock'", sql)
+
     def test_duplicate_prices_keep_minimum_and_conflicts_can_be_excluded(self):
         base = {"name": "Tela teste", "supplier": "A", "brand": None, "tech": None, "quality": None}
         rows = [dict(base, price=100), dict(base, price=80)]

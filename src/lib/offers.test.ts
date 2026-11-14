@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isStale, pickBestOffer, sortOffers } from "./offers";
+import { filterOffers, isStale, pickAvailableOffer, pickBestOffer, sortOffers } from "./offers";
 import type { Availability, Offer } from "./types";
 
 const offer = (name: string, price: number, availability: Availability, active = true): Offer => ({
@@ -54,5 +54,25 @@ describe("isStale", () => {
   it("compara em dias de calendário", () => {
     expect(isStale(new Date(2026, 9, 5, 9, 0).toISOString(), 15, now)).toBe(false); // 15 dias
     expect(isStale(new Date(2026, 9, 4, 9, 0).toISOString(), 15, now)).toBe(true); // 16 dias
+  });
+});
+
+describe("comparação para compra", () => {
+  const now = new Date("2026-10-10T12:00:00Z");
+  it("prioriza estoque mesmo com preço maior", () => {
+    expect(sortOffers([offer("Sem", 10, "out_of_stock"), alfa])[0].id).toBe("Alfa");
+  });
+  it("fornecedores inativos ficam depois dos ativos na comparação", () => {
+    expect(sortOffers([offer("Inativo", 1, "in_stock", false), gama])[0].id).toBe("Gama");
+  });
+  it("não destaca oferta antiga, inativa ou sem estoque", () => {
+    const old = { ...alfa, checked_at: "2026-08-01T10:00:00Z" };
+    expect(pickAvailableOffer([old, offer("Inativo", 10, "in_stock", false), offer("Sem", 1, "out_of_stock")], 15, now)).toBeNull();
+    expect(pickAvailableOffer([old, beta], 15, now)?.id).toBe("Beta");
+  });
+  it("aplica fornecedor, disponibilidade e atualização à mesma oferta", () => {
+    expect(filterOffers([alfa, beta, gama], { supplier: "Gama", availability: "in_stock" }, 15, now)).toEqual([]);
+    expect(filterOffers([alfa, beta, gama], { supplier: "Beta", availability: "in_stock", freshOnly: true, activeOnly: true }, 15, now)).toEqual([beta]);
+    expect(filterOffers([{ ...alfa, checked_at: "2026-08-01T00:00:00Z" }], { freshOnly: true }, 15, now)).toEqual([]);
   });
 });
